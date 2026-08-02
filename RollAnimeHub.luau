@@ -1020,7 +1020,7 @@ end)()
 
     local function saveConfig()
         if not writefile then return end
-        local data = { chars = {}, muts = {}, tiers = {}, stopAfterBuy = stopAfterBuy, rollDelay = rollDelay }
+        local data = { chars = {}, muts = {}, tiers = {}, stopAfterBuy = stopAfterBuy, rollDelay = rollDelay, isAutoRoll = isAutoRoll }
         for k in pairs(selectedChars) do table.insert(data.chars, k) end
         for k in pairs(selectedMutations) do table.insert(data.muts, k) end
         for k in pairs(selectedTiers) do table.insert(data.tiers, k) end
@@ -1038,6 +1038,7 @@ end)()
                 for _, v in ipairs(data.tiers or {}) do selectedTiers[v] = true end
                 if type(data.stopAfterBuy) == "boolean" then stopAfterBuy = data.stopAfterBuy end
                 if type(data.rollDelay) == "number" then rollDelay = data.rollDelay end
+                if type(data.isAutoRoll) == "boolean" then isAutoRoll = data.isAutoRoll end
             end
         end
     end)
@@ -1110,12 +1111,14 @@ end)()
     statusLabel.TextSize = 12
     statusLabel.TextColor3 = Modules.Palette.Colors.TextMuted
 
-    local _, rollTogEv = ToggleSwitchFactory.new("RollTog", "Enable Auto Roll", false, ctrlContent)
+    local _, rollTogEv = ToggleSwitchFactory.new("RollTog", "Enable Auto Roll", isAutoRoll, ctrlContent)
     rollTogEv.Event:Connect(function(s)
         isAutoRoll = s
         Modules.NotificationSystem.Notify("Auto Roll", s and "Enabled!" or "Disabled!", 2)
         if statusLabel then statusLabel.Text = s and "Rolling..." or "Idle." end
+        saveConfig()
     end)
+    if isAutoRoll and statusLabel then statusLabel.Text = "Rolling..." end
 
     TabSystem.new(contentCanvas, {
         {Name = "Auto Roll", Icon = "rbxassetid://7733920644", Content = rollTab}
@@ -1201,6 +1204,7 @@ end)()
     if getgenv().RollAnimeTask then task.cancel(getgenv().RollAnimeTask) end
     local myPlot = nil
     getgenv().RollAnimeTask = task.spawn(function()
+        task.wait(3) -- startup grace: lets the plot/game load before auto-rolling
         while true do
             if isAutoRoll and fireproximityprompt then
                 if not (myPlot and myPlot.Parent) then myPlot = findMyPlot() end
