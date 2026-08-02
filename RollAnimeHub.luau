@@ -1010,6 +1010,7 @@ end)()
     local selectedChars = {}      -- set: character Name -> true
     local selectedMutations = {}  -- set: mutation Name -> true
     local selectedTiers = {}      -- set: tier (Rarity) -> true; FIRST priority
+    local selectedBlacklist = {}  -- set: character Name -> true; NEVER buy (overrides all)
     local isAutoRoll = false
     local stopAfterBuy = true
     local rollDelay = 1.5
@@ -1020,10 +1021,11 @@ end)()
 
     local function saveConfig()
         if not writefile then return end
-        local data = { chars = {}, muts = {}, tiers = {}, stopAfterBuy = stopAfterBuy, rollDelay = rollDelay, isAutoRoll = isAutoRoll }
+        local data = { chars = {}, muts = {}, tiers = {}, blacklist = {}, stopAfterBuy = stopAfterBuy, rollDelay = rollDelay, isAutoRoll = isAutoRoll }
         for k in pairs(selectedChars) do table.insert(data.chars, k) end
         for k in pairs(selectedMutations) do table.insert(data.muts, k) end
         for k in pairs(selectedTiers) do table.insert(data.tiers, k) end
+        for k in pairs(selectedBlacklist) do table.insert(data.blacklist, k) end
         pcall(function() writefile(CONFIG_FILE, HttpService:JSONEncode(data)) end)
     end
 
@@ -1036,6 +1038,7 @@ end)()
                 for _, v in ipairs(data.chars or {}) do selectedChars[v] = true end
                 for _, v in ipairs(data.muts or {}) do selectedMutations[v] = true end
                 for _, v in ipairs(data.tiers or {}) do selectedTiers[v] = true end
+                for _, v in ipairs(data.blacklist or {}) do selectedBlacklist[v] = true end
                 if type(data.stopAfterBuy) == "boolean" then stopAfterBuy = data.stopAfterBuy end
                 if type(data.rollDelay) == "number" then rollDelay = data.rollDelay end
                 if type(data.isAutoRoll) == "boolean" then isAutoRoll = data.isAutoRoll end
@@ -1092,6 +1095,15 @@ end)()
         selectedTiers = {}
         if type(sel) == "table" then
             for _, t in ipairs(sel) do selectedTiers[t] = true end
+        end
+        saveConfig()
+    end)
+
+    local _, blacklistEv = DropdownFactory.new("BlacklistSel", "Blacklist Characters (never buy - overrides all)", characterNames, true, targetContent, selectedBlacklist)
+    blacklistEv.Event:Connect(function(sel)
+        selectedBlacklist = {}
+        if type(sel) == "table" then
+            for _, n in ipairs(sel) do selectedBlacklist[n] = true end
         end
         saveConfig()
     end)
@@ -1164,6 +1176,9 @@ end)()
     --  2. Otherwise: character must be selected AND either no mutation filter is
     --     set (buy any version) or its mutation is one we want.
     local function matches(info)
+        -- Blacklist overrides everything: never buy a blacklisted character,
+        -- even if its tier/mutation would otherwise match.
+        if info.Name and selectedBlacklist[info.Name] then return false end
         if info.Rarity and selectedTiers[info.Rarity] then return true end
         if not (info.Name and selectedChars[info.Name]) then return false end
         if next(selectedMutations) == nil then return true end
