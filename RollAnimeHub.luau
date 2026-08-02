@@ -970,7 +970,19 @@ end)()
         end
     end)
     table.sort(characterNames)
-    local mutationNames = {"Gold", "Diamond", "Demon", "Destroyer", "Astronaut", "Hollow", "Slayer"}
+
+    -- Pull mutations live from the game too, so new ones (e.g. "Cursed") show up
+    -- automatically on future updates without editing the script.
+    local mutationNames = {}
+    pcall(function()
+        for _, m in ipairs(ReplicatedStorage.Assets.Mutations:GetChildren()) do
+            table.insert(mutationNames, m.Name)
+        end
+    end)
+    table.sort(mutationNames)
+    if #mutationNames == 0 then -- fallback if the folder path ever changes
+        mutationNames = {"Gold", "Diamond", "Demon", "Destroyer", "Astronaut", "Hollow", "Slayer", "Cursed"}
+    end
 
     -- ================= State =================
     local selectedChars = {}      -- set: character Name -> true
