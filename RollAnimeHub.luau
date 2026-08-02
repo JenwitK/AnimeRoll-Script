@@ -984,9 +984,19 @@ end)()
         mutationNames = {"Gold", "Diamond", "Demon", "Destroyer", "Astronaut", "Hollow", "Slayer", "Cursed"}
     end
 
+    -- Tiers (rarities) pulled live from the game, so new tiers auto-appear.
+    local tierNames = {}
+    pcall(function()
+        for _, t in ipairs(ReplicatedStorage.Assets.RarityGradient:GetChildren()) do
+            table.insert(tierNames, t.Name)
+        end
+    end)
+    table.sort(tierNames)
+
     -- ================= State =================
     local selectedChars = {}      -- set: character Name -> true
     local selectedMutations = {}  -- set: mutation Name -> true
+    local selectedTiers = {}      -- set: tier (Rarity) -> true; FIRST priority
     local isAutoRoll = false
     local stopAfterBuy = true
     local rollDelay = 1.5
@@ -1030,6 +1040,14 @@ end)()
         selectedMutations = {}
         if type(sel) == "table" then
             for _, m in ipairs(sel) do selectedMutations[m] = true end
+        end
+    end)
+
+    local _, tierEv = DropdownFactory.new("TierSel", "Target Tiers (first priority - buys any match)", tierNames, true, targetContent)
+    tierEv.Event:Connect(function(sel)
+        selectedTiers = {}
+        if type(sel) == "table" then
+            for _, t in ipairs(sel) do selectedTiers[t] = true end
         end
     end)
 
@@ -1093,9 +1111,13 @@ end)()
         return n and n:FindFirstChild("RollPrompt")
     end
 
-    -- A slot matches when its character is selected AND either no mutation filter
-    -- is set (buy any version) or its mutation is one we want.
+    -- Match priority:
+    --  1. TIER (Rarity) — if the slot's tier is selected, buy it regardless of
+    --     the character/mutation filters (first priority).
+    --  2. Otherwise: character must be selected AND either no mutation filter is
+    --     set (buy any version) or its mutation is one we want.
     local function matches(info)
+        if info.Rarity and selectedTiers[info.Rarity] then return true end
         if not (info.Name and selectedChars[info.Name]) then return false end
         if next(selectedMutations) == nil then return true end
         return info.Mutation ~= nil and info.Mutation ~= "" and selectedMutations[info.Mutation] == true
