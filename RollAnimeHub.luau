@@ -1014,6 +1014,8 @@ end)()
     local isAutoRoll = false
     local stopAfterBuy = true
     local rollDelay = 1.5
+    local webhookUrl = ""
+    local webhookEnabled = false
 
     -- ================= Config persistence =================
     local HttpService = game:GetService("HttpService")
@@ -1021,7 +1023,7 @@ end)()
 
     local function saveConfig()
         if not writefile then return end
-        local data = { chars = {}, muts = {}, tiers = {}, blacklist = {}, stopAfterBuy = stopAfterBuy, rollDelay = rollDelay, isAutoRoll = isAutoRoll }
+        local data = { chars = {}, muts = {}, tiers = {}, blacklist = {}, stopAfterBuy = stopAfterBuy, rollDelay = rollDelay, isAutoRoll = isAutoRoll, webhookUrl = webhookUrl, webhookEnabled = webhookEnabled }
         for k in pairs(selectedChars) do table.insert(data.chars, k) end
         for k in pairs(selectedMutations) do table.insert(data.muts, k) end
         for k in pairs(selectedTiers) do table.insert(data.tiers, k) end
@@ -1042,9 +1044,76 @@ end)()
                 if type(data.stopAfterBuy) == "boolean" then stopAfterBuy = data.stopAfterBuy end
                 if type(data.rollDelay) == "number" then rollDelay = data.rollDelay end
                 if type(data.isAutoRoll) == "boolean" then isAutoRoll = data.isAutoRoll end
+                if type(data.webhookUrl) == "string" then webhookUrl = data.webhookUrl end
+                if type(data.webhookEnabled) == "boolean" then webhookEnabled = data.webhookEnabled end
             end
         end
     end)
+
+    -- ================= Discord Webhook =================
+    -- Detect the executor's HTTP request function (names vary by executor).
+    local httpRequest = (syn and syn.request) or (http and http.request) or http_request
+        or (fluxus and fluxus.request) or request
+
+    -- Tier (Rarity) -> embed side-bar color (decimal RGB).
+    local TIER_COLORS = {
+        God = 0xFFD700, Godly = 0xFFD700, Godlyx = 0xFFD700, Limited = 0xF1C40F,
+        Secret = 0x2C2F33, Mythic = 0xE01E1E, INVASION = 0x992D22,
+        Divine = 0xFF6AD5, Immortal = 0xC71585, Legendary = 0x9B59B6,
+        Epic = 0x8E44AD, Rare = 0x3498DB, Common = 0x95A5A6, OG = 0x1ABC9C, OP = 0xE67E22,
+    }
+    local function tierColor(tier) return TIER_COLORS[tier] or 0x808080 end
+
+    local function commafy(n)
+        local s = tostring(math.floor(tonumber(n) or 0))
+        return (s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", ""))
+    end
+
+    -- Throttled queue so we never trip Discord's ~30/min rate limit.
+    local webhookQueue = {}
+    if getgenv().RollAnimeWebhookTask then task.cancel(getgenv().RollAnimeWebhookTask) end
+    getgenv().RollAnimeWebhookTask = task.spawn(function()
+        while true do
+            local payload = table.remove(webhookQueue, 1)
+            if payload and httpRequest and webhookUrl ~= "" then
+                pcall(function()
+                    httpRequest({
+                        Url = webhookUrl,
+                        Method = "POST",
+                        Headers = { ["Content-Type"] = "application/json" },
+                        Body = HttpService:JSONEncode(payload),
+                    })
+                end)
+                task.wait(2) -- throttle: ~1 message / 2s
+            else
+                task.wait(0.5)
+            end
+        end
+    end)
+
+    -- Build + enqueue a purchase embed (matches the approved layout).
+    local function sendPurchaseWebhook(unit, tier, mutation, price)
+        if not webhookEnabled or webhookUrl == "" then return end
+        local fields = {
+            { name = "Player", value = tostring(LocalPlayer.Name), inline = true },
+            { name = "Unit", value = tostring(unit or "?"), inline = true },
+            { name = "Tier", value = tostring(tier or "?"), inline = true },
+            { name = "Price", value = commafy(price), inline = true },
+        }
+        if mutation and mutation ~= "" then
+            table.insert(fields, { name = "Mutation", value = tostring(mutation), inline = true })
+        end
+        table.insert(webhookQueue, {
+            username = "RollAnimeHub",
+            embeds = { {
+                title = "Unit Purchased",
+                color = tierColor(tier),
+                fields = fields,
+                footer = { text = "RollAnimeHub" },
+                timestamp = DateTime.now():ToIsoDate(),
+            } },
+        })
+    end
 
     -- ================= Tab layout helper =================
     local function CreateTabContent(name)
@@ -1132,6 +1201,55 @@ end)()
     end)
     if isAutoRoll and statusLabel then statusLabel.Text = "Rolling..." end
 
+    -- Discord Webhook Section (below Auto Roll)
+    local webhookSec = SectionFactory.new("Discord Webhook", rollTab)
+    local webhookContent = webhookSec:WaitForChild("Content")
+
+    local webhookInput = Modules.InputFactory.new("WebhookInput", "Paste Discord Webhook URL", webhookContent)
+    webhookInput.Size = UDim2.new(1, 0, 0, 34)
+    webhookInput.Text = webhookUrl
+    webhookInput.ClearTextOnFocus = false
+    -- Keep the (long) URL clipped inside the box instead of bleeding out.
+    webhookInput.ClipsDescendants = true
+    webhookInput.TextXAlignment = Enum.TextXAlignment.Left
+    webhookInput.TextTruncate = Enum.TextTruncate.AtEnd
+    webhookInput.TextSize = 12
+    local whPad = Instance.new("UIPadding")
+    whPad.PaddingLeft = UDim.new(0, 10)
+    whPad.PaddingRight = UDim.new(0, 10)
+    whPad.Parent = webhookInput
+    webhookInput.FocusLost:Connect(function()
+        webhookUrl = webhookInput.Text
+        saveConfig()
+    end)
+
+    local _, webhookTogEv = ToggleSwitchFactory.new("WebhookTog", "Enable Webhook", webhookEnabled, webhookContent)
+    webhookTogEv.Event:Connect(function(s)
+        webhookEnabled = s
+        saveConfig()
+        Modules.NotificationSystem.Notify("Webhook", s and "Enabled!" or "Disabled!", 2)
+    end)
+
+    local testBtn = Modules.TextButtonFactory.new("WebhookTest", "Send Test Message", webhookContent)
+    testBtn.Size = UDim2.new(1, 0, 0, 34)
+    Modules.ButtonAnimations.BindSecondaryHoverAndClick(testBtn)
+    testBtn.MouseButton1Click:Connect(function()
+        if webhookUrl == "" then
+            Modules.NotificationSystem.Notify("Webhook", "Paste a webhook URL first!", 3)
+            return
+        end
+        if not httpRequest then
+            Modules.NotificationSystem.Notify("Webhook", "Executor has no http request function.", 4)
+            return
+        end
+        -- temporarily bypass the enabled check for the test
+        local wasEnabled = webhookEnabled
+        webhookEnabled = true
+        sendPurchaseWebhook("Gojo", "God", "Slayer", 32000)
+        webhookEnabled = wasEnabled
+        Modules.NotificationSystem.Notify("Webhook", "Test sent! Check your Discord.", 3)
+    end)
+
     TabSystem.new(contentCanvas, {
         {Name = "Auto Roll", Icon = "rbxassetid://7733920644", Content = rollTab}
     })
@@ -1197,6 +1315,7 @@ end)()
                 pcall(function() BuyRemote:FireServer(rollId, slot) end)
                 local mtxt = (info.Mutation and info.Mutation ~= "") and (" [" .. tostring(info.Mutation) .. "]") or ""
                 Modules.NotificationSystem.Notify("Bought!", tostring(info.Name) .. mtxt .. " ($" .. tostring(info.Price) .. ")", 4)
+                sendPurchaseWebhook(info.Name, info.Rarity, info.Mutation, info.Price)
                 if stopAfterBuy then stopNow = true break end
             end
         end
