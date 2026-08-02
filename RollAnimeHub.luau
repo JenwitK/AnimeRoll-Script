@@ -678,7 +678,7 @@ Modules.DropdownFactory = (function()
     local TextButtonFactory = Modules.TextButtonFactory
     local TextLabelFactory = Modules.TextLabelFactory
     local DropdownFactory = {}
-    function DropdownFactory.new(name: string, title: string, options: {string}, isMulti: boolean, parent: Instance?): (Frame, BindableEvent)
+    function DropdownFactory.new(name: string, title: string, options: {string}, isMulti: boolean, parent: Instance?, preselected: {[string]: boolean}?): (Frame, BindableEvent)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, 65)
         row.BackgroundTransparency = 1
@@ -746,6 +746,16 @@ Modules.DropdownFactory = (function()
         local isOpen = false
         local selectedItems = {}
 
+        -- Restore previously-saved selections (shown highlighted + in the label).
+        if isMulti and preselected then
+            for _, opt in ipairs(options) do
+                if preselected[opt] then table.insert(selectedItems, opt) end
+            end
+            if #selectedItems > 0 then
+                mainBtn.Text = table.concat(selectedItems, ", ")
+            end
+        end
+
         mainBtn.MouseButton1Click:Connect(function()
             isOpen = not isOpen
             scrollingFrame.Visible = isOpen
@@ -759,9 +769,12 @@ Modules.DropdownFactory = (function()
             optBtn.BackgroundColor3 = Palette.Colors.Secondary
             optBtn.TextColor3 = Palette.Colors.TextMuted
             optBtn.ZIndex = 16
-            
+            if isMulti and preselected and preselected[optionText] then
+                optBtn.TextColor3 = Palette.Colors.Accent
+            end
+
             ButtonAnimations.BindSecondaryHoverAndClick(optBtn)
-            
+
             optBtn.MouseButton1Click:Connect(function()
                 if isMulti then
                     if table.find(selectedItems, optionText) then
@@ -1001,6 +1014,34 @@ end)()
     local stopAfterBuy = true
     local rollDelay = 1.5
 
+    -- ================= Config persistence =================
+    local HttpService = game:GetService("HttpService")
+    local CONFIG_FILE = "RollAnimeHub_config.json"
+
+    local function saveConfig()
+        if not writefile then return end
+        local data = { chars = {}, muts = {}, tiers = {}, stopAfterBuy = stopAfterBuy, rollDelay = rollDelay }
+        for k in pairs(selectedChars) do table.insert(data.chars, k) end
+        for k in pairs(selectedMutations) do table.insert(data.muts, k) end
+        for k in pairs(selectedTiers) do table.insert(data.tiers, k) end
+        pcall(function() writefile(CONFIG_FILE, HttpService:JSONEncode(data)) end)
+    end
+
+    -- Restore saved targets/toggles/delay so nothing needs re-picking each run.
+    -- (Auto Roll itself is intentionally NOT auto-started on load.)
+    pcall(function()
+        if isfile and readfile and isfile(CONFIG_FILE) then
+            local data = HttpService:JSONDecode(readfile(CONFIG_FILE))
+            if type(data) == "table" then
+                for _, v in ipairs(data.chars or {}) do selectedChars[v] = true end
+                for _, v in ipairs(data.muts or {}) do selectedMutations[v] = true end
+                for _, v in ipairs(data.tiers or {}) do selectedTiers[v] = true end
+                if type(data.stopAfterBuy) == "boolean" then stopAfterBuy = data.stopAfterBuy end
+                if type(data.rollDelay) == "number" then rollDelay = data.rollDelay end
+            end
+        end
+    end)
+
     -- ================= Tab layout helper =================
     local function CreateTabContent(name)
         local sf = ScrollingFrameFactory.new(name)
@@ -1027,39 +1068,42 @@ end)()
     local targetSec = SectionFactory.new("Target Selection", rollTab)
     local targetContent = targetSec:WaitForChild("Content")
 
-    local _, charEv = DropdownFactory.new("CharSel", "Target Characters", characterNames, true, targetContent)
+    local _, charEv = DropdownFactory.new("CharSel", "Target Characters", characterNames, true, targetContent, selectedChars)
     charEv.Event:Connect(function(sel)
         selectedChars = {}
         if type(sel) == "table" then
             for _, n in ipairs(sel) do selectedChars[n] = true end
         end
+        saveConfig()
     end)
 
-    local _, mutEv = DropdownFactory.new("MutSel", "Target Mutations (empty = any)", mutationNames, true, targetContent)
+    local _, mutEv = DropdownFactory.new("MutSel", "Target Mutations (empty = any)", mutationNames, true, targetContent, selectedMutations)
     mutEv.Event:Connect(function(sel)
         selectedMutations = {}
         if type(sel) == "table" then
             for _, m in ipairs(sel) do selectedMutations[m] = true end
         end
+        saveConfig()
     end)
 
-    local _, tierEv = DropdownFactory.new("TierSel", "Target Tiers (first priority - buys any match)", tierNames, true, targetContent)
+    local _, tierEv = DropdownFactory.new("TierSel", "Target Tiers (first priority - buys any match)", tierNames, true, targetContent, selectedTiers)
     tierEv.Event:Connect(function(sel)
         selectedTiers = {}
         if type(sel) == "table" then
             for _, t in ipairs(sel) do selectedTiers[t] = true end
         end
+        saveConfig()
     end)
 
     -- Auto Roll Control Section
     local ctrlSec = SectionFactory.new("Auto Roll", rollTab)
     local ctrlContent = ctrlSec:WaitForChild("Content")
 
-    local _, stopEv = ToggleSwitchFactory.new("StopTog", "Stop After Buying Target", true, ctrlContent)
-    stopEv.Event:Connect(function(s) stopAfterBuy = s end)
+    local _, stopEv = ToggleSwitchFactory.new("StopTog", "Stop After Buying Target", stopAfterBuy, ctrlContent)
+    stopEv.Event:Connect(function(s) stopAfterBuy = s; saveConfig() end)
 
-    local _, delayEv = Modules.SliderFactory.new("RollDelay", "Roll Delay (s)", 0.1, 10, 1.5, ctrlContent)
-    delayEv.Event:Connect(function(val) rollDelay = val end)
+    local _, delayEv = Modules.SliderFactory.new("RollDelay", "Roll Delay (s)", 0.1, 10, rollDelay, ctrlContent)
+    delayEv.Event:Connect(function(val) rollDelay = val; saveConfig() end)
 
     local statusLabel = TextLabelFactory.new("Status", "Idle.", ctrlContent)
     statusLabel.Size = UDim2.new(1, 0, 0, 20)
@@ -1142,6 +1186,15 @@ end)()
             isAutoRoll = false
             if statusLabel then statusLabel.Text = "Target bought - stopped. Re-toggle to continue." end
         end
+    end)
+
+    -- Built-in Anti-AFK: prevents the idle kick by simulating a harmless
+    -- right-click whenever Roblox flags us idle. Guarded against duplicates.
+    if getgenv().RollAnimeAntiAFK then pcall(function() getgenv().RollAnimeAntiAFK:Disconnect() end) end
+    getgenv().RollAnimeAntiAFK = LocalPlayer.Idled:Connect(function()
+        local VirtualUser = game:GetService("VirtualUser")
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new(0, 0))
     end)
 
     -- Roll loop: trigger the real roll prompt; the handler above buys matches.
