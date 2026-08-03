@@ -678,7 +678,7 @@ Modules.DropdownFactory = (function()
     local TextButtonFactory = Modules.TextButtonFactory
     local TextLabelFactory = Modules.TextLabelFactory
     local DropdownFactory = {}
-    function DropdownFactory.new(name: string, title: string, options: {string}, isMulti: boolean, parent: Instance?, preselected: {[string]: boolean}?): (Frame, BindableEvent)
+    function DropdownFactory.new(name: string, title: string, options: {string}, isMulti: boolean, parent: Instance?, preselected: {[string]: boolean}?, searchable: boolean?): (Frame, BindableEvent)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, 65)
         row.BackgroundTransparency = 1
@@ -701,7 +701,7 @@ Modules.DropdownFactory = (function()
         mainBtn.TextColor3 = Palette.Colors.TextPrimary
         mainBtn.TextTruncate = Enum.TextTruncate.AtEnd
         ButtonAnimations.BindSecondaryHoverAndClick(mainBtn)
-        
+
         local arrow = TextLabelFactory.new("Arrow", "v", mainBtn)
         arrow.Size = UDim2.new(0, 30, 1, 0)
         arrow.Position = UDim2.new(1, -30, 0, 0)
@@ -709,10 +709,58 @@ Modules.DropdownFactory = (function()
         arrow.TextSize = 12
         arrow.TextColor3 = Palette.Colors.TextMuted
 
+        local onOptionSelected = Instance.new("BindableEvent")
+        local isOpen = false
+        local selectedItems = {}
+        local allOptions = options -- master list; the visible buttons are filtered from this
+
+        -- Restore previously-saved selections (shown in the label).
+        if isMulti and preselected then
+            for _, opt in ipairs(allOptions) do
+                if preselected[opt] then table.insert(selectedItems, opt) end
+            end
+            if #selectedItems > 0 then
+                mainBtn.Text = table.concat(selectedItems, ", ")
+            end
+        end
+
+        -- Optional search box, pinned just below the main button.
+        local searchBox
+        if searchable then
+            searchBox = Instance.new("TextBox")
+            searchBox.Name = "Search"
+            searchBox.Size = UDim2.new(1, 0, 0, 28)
+            searchBox.Position = UDim2.new(0, 0, 1, 4)
+            searchBox.BackgroundColor3 = Palette.Colors.Secondary
+            searchBox.BorderSizePixel = 0
+            searchBox.Font = Palette.Tokens.FontPrimary
+            searchBox.TextSize = 13
+            searchBox.TextColor3 = Palette.Colors.TextPrimary
+            searchBox.PlaceholderText = "Search..."
+            searchBox.Text = ""
+            searchBox.ClearTextOnFocus = false
+            searchBox.TextXAlignment = Enum.TextXAlignment.Left
+            searchBox.ClipsDescendants = true
+            searchBox.Visible = false
+            searchBox.ZIndex = 16
+            searchBox.Parent = container
+            local sc = Instance.new("UICorner")
+            sc.CornerRadius = Palette.Tokens.BorderRadius
+            sc.Parent = searchBox
+            local ss = Instance.new("UIStroke")
+            ss.Color = Palette.Colors.BorderStroke
+            ss.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+            ss.Parent = searchBox
+            local sp = Instance.new("UIPadding")
+            sp.PaddingLeft = UDim.new(0, 8)
+            sp.PaddingRight = UDim.new(0, 8)
+            sp.Parent = searchBox
+        end
+
         local scrollingFrame = Instance.new("ScrollingFrame")
         scrollingFrame.Name = "OptionsList"
         scrollingFrame.Size = UDim2.new(1, 0, 0, 120)
-        scrollingFrame.Position = UDim2.new(0, 0, 1, 4)
+        scrollingFrame.Position = searchable and UDim2.new(0, 0, 1, 36) or UDim2.new(0, 0, 1, 4)
         scrollingFrame.BackgroundColor3 = Palette.Colors.SectionBg
         scrollingFrame.BorderSizePixel = 0
         scrollingFrame.ScrollBarThickness = 2
@@ -741,112 +789,76 @@ Modules.DropdownFactory = (function()
         padding.PaddingLeft = UDim.new(0, 6)
         padding.PaddingRight = UDim.new(0, 6)
         padding.Parent = scrollingFrame
-        
-        local onOptionSelected = Instance.new("BindableEvent")
-        local isOpen = false
-        local selectedItems = {}
 
-        -- Restore previously-saved selections (shown highlighted + in the label).
-        if isMulti and preselected then
-            for _, opt in ipairs(options) do
-                if preselected[opt] then table.insert(selectedItems, opt) end
+        -- Rebuild the visible option buttons, filtered by the search text.
+        local function renderOptions(filter)
+            filter = string.lower(filter or "")
+            for _, child in ipairs(scrollingFrame:GetChildren()) do
+                if child:IsA("TextButton") then child:Destroy() end
             end
-            if #selectedItems > 0 then
-                mainBtn.Text = table.concat(selectedItems, ", ")
-            end
-        end
-
-        mainBtn.MouseButton1Click:Connect(function()
-            isOpen = not isOpen
-            scrollingFrame.Visible = isOpen
-            arrow.Text = isOpen and "^" or "v"
-            if isOpen then row.ZIndex = 10 container.ZIndex = 10 else row.ZIndex = 1 container.ZIndex = 1 end
-        end)
-
-        for i, optionText in ipairs(options) do
-            local optBtn = TextButtonFactory.new("Option_" .. i, optionText, scrollingFrame)
-            optBtn.Size = UDim2.new(1, 0, 0, 32)
-            optBtn.BackgroundColor3 = Palette.Colors.Secondary
-            optBtn.TextColor3 = Palette.Colors.TextMuted
-            optBtn.ZIndex = 16
-            if isMulti and preselected and preselected[optionText] then
-                optBtn.TextColor3 = Palette.Colors.Accent
-            end
-
-            ButtonAnimations.BindSecondaryHoverAndClick(optBtn)
-
-            optBtn.MouseButton1Click:Connect(function()
-                if isMulti then
-                    if table.find(selectedItems, optionText) then
-                        table.remove(selectedItems, table.find(selectedItems, optionText))
-                        optBtn.TextColor3 = Palette.Colors.TextMuted
-                    else
-                        table.insert(selectedItems, optionText)
+            local idx = 0
+            for _, optionText in ipairs(allOptions) do
+                if filter == "" or string.find(string.lower(optionText), filter, 1, true) then
+                    idx = idx + 1
+                    local optBtn = TextButtonFactory.new("Option_" .. idx, optionText, scrollingFrame)
+                    optBtn.Size = UDim2.new(1, 0, 0, 32)
+                    optBtn.BackgroundColor3 = Palette.Colors.Secondary
+                    optBtn.TextColor3 = Palette.Colors.TextMuted
+                    optBtn.ZIndex = 16
+                    if isMulti and table.find(selectedItems, optionText) then
                         optBtn.TextColor3 = Palette.Colors.Accent
                     end
-                    mainBtn.Text = #selectedItems > 0 and table.concat(selectedItems, ", ") or "Select options..."
-                    onOptionSelected:Fire(selectedItems)
-                else
-                    mainBtn.Text = optionText
-                    isOpen = false
-                    scrollingFrame.Visible = false
-                    arrow.Text = "v"
-                    row.ZIndex = 1 container.ZIndex = 1
-                    onOptionSelected:Fire({optionText})
+                    ButtonAnimations.BindSecondaryHoverAndClick(optBtn)
+                    optBtn.MouseButton1Click:Connect(function()
+                        if isMulti then
+                            local at = table.find(selectedItems, optionText)
+                            if at then
+                                table.remove(selectedItems, at)
+                                optBtn.TextColor3 = Palette.Colors.TextMuted
+                            else
+                                table.insert(selectedItems, optionText)
+                                optBtn.TextColor3 = Palette.Colors.Accent
+                            end
+                            mainBtn.Text = #selectedItems > 0 and table.concat(selectedItems, ", ") or "Select options..."
+                            onOptionSelected:Fire(selectedItems)
+                        else
+                            mainBtn.Text = optionText
+                            isOpen = false
+                            scrollingFrame.Visible = false
+                            if searchBox then searchBox.Visible = false end
+                            arrow.Text = "v"
+                            row.ZIndex = 1 container.ZIndex = 1
+                            onOptionSelected:Fire({optionText})
+                        end
+                    end)
                 end
-            end)
+            end
         end
-        
+
         listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
             local contentHeight = listLayout.AbsoluteContentSize.Y + 12
             local height = math.min(140, contentHeight)
             scrollingFrame.Size = UDim2.new(1, 0, 0, height)
             scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, contentHeight)
         end)
-        
-        local function Refresh(newOptions)
-            for _, child in ipairs(scrollingFrame:GetChildren()) do
-                if child:IsA("TextButton") then child:Destroy() end
-            end
-            options = newOptions
-            if not isMulti then
-                if not table.find(options, mainBtn.Text) then
-                    mainBtn.Text = options[1] or "Select..."
-                end
-            end
-            for i, optionText in ipairs(options) do
-                local optBtn = TextButtonFactory.new("Option_" .. i, optionText, scrollingFrame)
-                optBtn.Size = UDim2.new(1, 0, 0, 32)
-                optBtn.BackgroundColor3 = Palette.Colors.Secondary
-                optBtn.TextColor3 = Palette.Colors.TextMuted
-                optBtn.ZIndex = 16
-                
-                ButtonAnimations.BindSecondaryHoverAndClick(optBtn)
-                
-                optBtn.MouseButton1Click:Connect(function()
-                    if isMulti then
-                        if table.find(selectedItems, optionText) then
-                            table.remove(selectedItems, table.find(selectedItems, optionText))
-                            optBtn.TextColor3 = Palette.Colors.TextMuted
-                        else
-                            table.insert(selectedItems, optionText)
-                            optBtn.TextColor3 = Palette.Colors.Accent
-                        end
-                        mainBtn.Text = #selectedItems > 0 and table.concat(selectedItems, ", ") or "Select options..."
-                        onOptionSelected:Fire(selectedItems)
-                    else
-                        mainBtn.Text = optionText
-                        isOpen = false
-                        scrollingFrame.Visible = false
-                        arrow.Text = "v"
-                        row.ZIndex = 1 container.ZIndex = 1
-                        onOptionSelected:Fire({optionText})
-                    end
-                end)
-            end
+
+        mainBtn.MouseButton1Click:Connect(function()
+            isOpen = not isOpen
+            scrollingFrame.Visible = isOpen
+            if searchBox then searchBox.Visible = isOpen end
+            arrow.Text = isOpen and "^" or "v"
+            if isOpen then row.ZIndex = 10 container.ZIndex = 10 else row.ZIndex = 1 container.ZIndex = 1 end
+        end)
+
+        if searchBox then
+            searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+                renderOptions(searchBox.Text)
+            end)
         end
 
-        return row, onOptionSelected, Refresh
+        renderOptions("")
+
+        return row, onOptionSelected
     end
     return DropdownFactory
 end)()
@@ -1141,7 +1153,7 @@ end)()
     local targetSec = SectionFactory.new("Target Selection", rollTab)
     local targetContent = targetSec:WaitForChild("Content")
 
-    local _, charEv = DropdownFactory.new("CharSel", "Target Characters", characterNames, true, targetContent, selectedChars)
+    local _, charEv = DropdownFactory.new("CharSel", "Target Characters", characterNames, true, targetContent, selectedChars, true)
     charEv.Event:Connect(function(sel)
         selectedChars = {}
         if type(sel) == "table" then
@@ -1168,7 +1180,7 @@ end)()
         saveConfig()
     end)
 
-    local _, blacklistEv = DropdownFactory.new("BlacklistSel", "Blacklist Characters (never buy - overrides all)", characterNames, true, targetContent, selectedBlacklist)
+    local _, blacklistEv = DropdownFactory.new("BlacklistSel", "Blacklist Characters (never buy - overrides all)", characterNames, true, targetContent, selectedBlacklist, true)
     blacklistEv.Event:Connect(function(sel)
         selectedBlacklist = {}
         if type(sel) == "table" then
