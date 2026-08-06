@@ -5,7 +5,16 @@ local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+
+-- Autoexecute can run before the client is fully ready. Wait for the game to
+-- load and for LocalPlayer to exist, otherwise LocalPlayer is nil and the whole
+-- hub breaks (plot not found, roll loop dies, webhook errors).
+if not game:IsLoaded() then game.Loaded:Wait() end
 local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    repeat task.wait() until Players.LocalPlayer
+    LocalPlayer = Players.LocalPlayer
+end
 
 local cloneref = (cloneref or clonereference or function(instance) return instance end)
 local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
@@ -1336,7 +1345,7 @@ end)()
                 pcall(function() BuyRemote:FireServer(rollId, slot) end)
                 local mtxt = (info.Mutation and info.Mutation ~= "") and (" [" .. tostring(info.Mutation) .. "]") or ""
                 Modules.NotificationSystem.Notify("Bought!", tostring(info.Name) .. mtxt .. " ($" .. tostring(info.Price) .. ")", 4)
-                sendPurchaseWebhook(info.Name, info.Rarity, info.Mutation, info.Price)
+                pcall(sendPurchaseWebhook, info.Name, info.Rarity, info.Mutation, info.Price)
                 if stopAfterBuy then stopNow = true break end
             end
         end
