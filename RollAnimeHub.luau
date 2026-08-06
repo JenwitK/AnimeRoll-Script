@@ -1274,11 +1274,20 @@ end)()
     -- (verified: gold dropped by the exact price). Earlier buys failed only
     -- because they used ghost rollIds from Roll:FireServer.
 
-    -- Find the plot this player owns (its units/previews carry our UserId).
-    -- Note: plot assignment changes between sessions, so resolve dynamically.
+    -- Find the plot this player owns. Plot assignment changes between sessions,
+    -- so resolve dynamically. Primary: the plot carries an owner attribute
+    -- (works even with no units placed / right after joining). Fallback: an
+    -- owned unit or roll-preview under the plot.
     local function findMyPlot()
         local plots = Workspace:FindFirstChild("Plots")
         if not plots then return nil end
+        local myIdStr = tostring(LocalPlayer.UserId)
+        for _, plot in ipairs(plots:GetChildren()) do
+            if tostring(plot:GetAttribute("FightOwnerUserId")) == myIdStr
+                or plot:GetAttribute("Owner") == LocalPlayer.Name then
+                return plot
+            end
+        end
         for _, plot in ipairs(plots:GetChildren()) do
             local chars = plot:FindFirstChild("Characters")
             if chars then
